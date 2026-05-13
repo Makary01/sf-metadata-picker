@@ -5,30 +5,12 @@ local function has_mtd(node)
     return node.metadata_to_retrieve and #node.metadata_to_retrieve > 0
 end
 
--- Recursive toggle for "Select All" behavior
 local function toggle_recursive(node, is_selected)
     node.is_selected = is_selected
     if node.children then
         for _, child in ipairs(node.children) do
             toggle_recursive(child, is_selected)
         end
-    end
-end
-
-local function update_parents(node)
-    local curr = node.parent
-    while curr do
-        if not has_mtd(curr) then
-            local all_selected = true
-            for _, child in ipairs(curr.children or {}) do
-                if not child.is_selected then
-                    all_selected = false
-                    break
-                end
-            end
-            curr.is_selected = all_selected
-        end
-        curr = curr.parent
     end
 end
 
@@ -191,14 +173,51 @@ function M.show_tree(tree, on_submit)
         end
     end)
 
+    local function smart_toggle_range(start_line, end_line)
+        if start_line > end_line then
+            start_line, end_line = end_line, start_line
+        end
+
+        local selectable_nodes = {}
+        local all_selected = true
+
+        for line = start_line, end_line do
+            local node = state.line_to_node[line]
+
+            if node and has_mtd(node) then
+                table.insert(selectable_nodes, node)
+
+                if not node.is_selected then
+                    all_selected = false
+                end
+            end
+        end
+
+        if #selectable_nodes == 0 then
+            return
+        end
+
+        -- If everything already selected -> deselect
+        -- otherwise select all
+        local new_value = not all_selected
+
+        for _, node in ipairs(selectable_nodes) do
+            node.is_selected = new_value
+        end
+
+        render(state)
+    end
+
+    vim.keymap.set('x', '<CR>', function()
+        local start_line = vim.fn.getpos('v')[2]
+        local end_line = vim.fn.line('.')
+
+        smart_toggle_range(start_line, end_line)
+    end, { buffer = buf, silent = true })
+
     map('<CR>', function()
         local line = api.nvim_win_get_cursor(win)[1]
-        local node = state.line_to_node[line]
-        if not node or not has_mtd(node) then return end
-
-        node.is_selected = not node.is_selected
-        update_parents(node)
-        render(state)
+        smart_toggle_range(line, line)
     end)
 
     map('<C-f>', function()
