@@ -83,19 +83,19 @@ local function build_lines(state, node, indent)
     end
 
     if node.xmlName ~= "root" then
-        local prefix = string.rep("  ", indent)
         local has_children = node.children and #node.children > 0
-        -- Force the expand icon to point down if we are searching and showing children
-        local expand_icon = has_children and ((node.is_expanded or is_searching) and "▼ " or "▶ ") or "  "
+        local prefix
 
-        local select_icon = ""
+        local indentPrefix = string.rep("  ", indent)
         if has_mtd(node) then
-            select_icon = node.is_selected and "🗹 " or "☐ "
-        elseif not is_searching then
-            select_icon = node.is_expanded and "󰝰 " or "󰉋 "
+            prefix = indentPrefix
+                .. (has_children and (node.is_expanded and "▼ " or "▶ ") or "  ")
+                .. (node.is_selected and "🗹 " or "☐ ")
+        else
+            prefix = indentPrefix .. "  " .. (node.is_expanded and "󰝰 " or "󰉋 ")
         end
 
-        table.insert(state.lines, prefix .. expand_icon .. select_icon .. (node.label or "Unknown"))
+        table.insert(state.lines, prefix .. (node.label or "Unknown"))
         state.line_to_node[#state.lines] = node
     end
 
@@ -111,13 +111,21 @@ local function render(state)
     state.line_to_node = {}
 
     table.insert(state.lines,
-        " <Tab> Expand | <CR> Select | [/] Search | [c] Clear Search | [f] Filter Sel | [r] Reset | [s] Submit | [q] Close"
+        " <Tab> Expand | <CR> Select | <C-f> Search | [c] Clear Search | [f] Filter Sel | [r] Reset | <C-s> Submit | [q] Close"
     )
+    local filters = {}
     if state.show_only_selected then
-        table.insert(state.lines, " (*) SHOWING ONLY SELECTED")
+        table.insert(filters, "   • 🗹 SHOWING ONLY SELECTED")
     end
     if state.search_term and state.search_term ~= "" then
-        table.insert(state.lines, " 🔍 SEARCH ACTIVE: '" .. state.search_term .. "'")
+        table.insert(filters, "   • ⌕ SEARCH TERM: '" .. state.search_term .. "'")
+    end
+    if #filters > 0 then
+        table.insert(state.lines, "")
+        table.insert(state.lines, " 󰈲 FILTERS ACTIVE: ")
+        for _, filter in ipairs(filters) do
+            table.insert(state.lines, filter)
+        end
     end
     table.insert(state.lines, "")
 
@@ -186,23 +194,19 @@ function M.show_tree(tree, on_submit)
     map('<CR>', function()
         local line = api.nvim_win_get_cursor(win)[1]
         local node = state.line_to_node[line]
-        if not node then return end
+        if not node or not has_mtd(node) then return end
 
-        if has_mtd(node) then
-            node.is_selected = not node.is_selected
-        elseif not state.search_term or state.search_term == "" then
-            toggle_recursive(node, not node.is_selected)
-        end
-
+        node.is_selected = not node.is_selected
         update_parents(node)
         render(state)
     end)
 
-    map('/', function()
+    map('<C-f>', function()
         vim.ui.input({ prompt = "Search Metadata: " }, function(input)
             if input then
                 state.search_term = string.lower(input)
                 render(state)
+                vim.api.nvim_win_set_cursor(0, { 1, 0 })
             end
         end)
     end)
@@ -213,7 +217,9 @@ function M.show_tree(tree, on_submit)
     end)
 
     map('f', function()
-        state.show_only_selected = not state.show_only_selected; render(state)
+        state.show_only_selected = not state.show_only_selected
+        render(state)
+        vim.api.nvim_win_set_cursor(0, { 1, 0 })
     end)
 
     map('r', function()
@@ -222,7 +228,7 @@ function M.show_tree(tree, on_submit)
 
     map('q', function() api.nvim_win_close(win, true) end)
 
-    map('s', function()
+    map('<C-s>', function()
         local selected = collect_selected(state.tree)
         api.nvim_win_close(win, true)
         if on_submit then
