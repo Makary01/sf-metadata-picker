@@ -18,7 +18,6 @@ end
 local function update_parents(node)
     local curr = node.parent
     while curr do
-        -- Only automatically sync state for nodes widthout metadata (i.e. folders)
         if not has_mtd(curr) then
             local all_selected = true
             for _, child in ipairs(curr.children or {}) do
@@ -47,8 +46,26 @@ local function init_tree(node, parent)
     end
 end
 
+local function node_matches(node, term)
+    if not term or term == "" then return true end
+
+    local label = node.label and string.lower(node.label) or ""
+    if has_mtd(node) and string.find(label, term, 1, true) then
+        return true
+    end
+
+    if node.children then
+        for _, child in ipairs(node.children) do
+            if node_matches(child, term) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 local function build_lines(state, node, indent)
-    -- Filtering logic
     if state.show_only_selected and node.xmlName ~= "root" then
         local function has_sel(n)
             if n.is_selected then return true end
@@ -58,15 +75,23 @@ local function build_lines(state, node, indent)
         if not has_sel(node) then return end
     end
 
+    local is_searching = state.search_term and state.search_term ~= ""
+    if is_searching and node.xmlName ~= "root" then
+        if not node_matches(node, state.search_term) then
+            return
+        end
+    end
+
     if node.xmlName ~= "root" then
         local prefix = string.rep("  ", indent)
         local has_children = node.children and #node.children > 0
-        local expand_icon = has_children and (node.is_expanded and "▼ " or "▶ ") or "  "
+        -- Force the expand icon to point down if we are searching and showing children
+        local expand_icon = has_children and ((node.is_expanded or is_searching) and "▼ " or "▶ ") or "  "
 
         local select_icon = ""
         if has_mtd(node) then
             select_icon = node.is_selected and "(*) " or "( ) "
-        else
+        elseif not is_searching then
             select_icon = node.is_selected and "[x] " or "[ ] "
         end
 
@@ -74,7 +99,7 @@ local function build_lines(state, node, indent)
         state.line_to_node[#state.lines] = node
     end
 
-    if node.xmlName == "root" or node.is_expanded or state.show_only_selected then
+    if node.xmlName == "root" or node.is_expanded or state.show_only_selected or is_searching then
         for _, child in ipairs(node.children or {}) do
             build_lines(state, child, (node.xmlName == "root" and indent or indent + 1))
         end
@@ -86,12 +111,17 @@ local function render(state)
     state.line_to_node = {}
 
     table.insert(state.lines,
-        " <Tab> Expand/Collapse | <CR> Toggle/Select All | [f] Filter Selected | [r] Reset All | [s] Submit | [q] Close"
+        " <Tab> Expand | <CR> Select | [/] Search | [c] Clear Search | [f] Filter Sel | [r] Reset | [s] Submit | [q] Close"
     )
+    if state.show_only_selected then
+        table.insert(state.lines, " (*) SHOWING ONLY SELECTED")
+    end
+    if state.search_term and state.search_term ~= "" then
+        table.insert(state.lines, " 🔍 SEARCH ACTIVE: '" .. state.search_term .. "'")
+    end
     table.insert(state.lines, "")
 
     build_lines(state, state.tree, 0)
-
 
     vim.bo[state.buf].modifiable = true
     api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
@@ -122,7 +152,7 @@ local function collect_selected(tree)
 end
 
 function M.show_tree(tree, on_submit)
-    init_tree(tree, nil) -- Pass nil as the parent for the root node
+    init_tree(tree, nil)
 
     local buf = api.nvim_create_buf(false, true)
     local width, height = math.floor(vim.o.columns * 0.8), math.floor(vim.o.lines * 0.8)
@@ -138,7 +168,7 @@ function M.show_tree(tree, on_submit)
         style = "minimal",
     })
 
-    local state = { buf = buf, win = win, tree = tree, line_to_node = {}, show_only_selected = false }
+    local state = { buf = buf, win = win, tree = tree, line_to_node = {}, show_only_selected = false, search_term = "" }
     render(state)
 
     local function map(key, fn)
@@ -160,11 +190,25 @@ function M.show_tree(tree, on_submit)
 
         if has_mtd(node) then
             node.is_selected = not node.is_selected
-        else
+        elseif not state.search_term or state.search_term == "" then
             toggle_recursive(node, not node.is_selected)
         end
 
         update_parents(node)
+        render(state)
+    end)
+
+    map('/', function()
+        vim.ui.input({ prompt = "Search Metadata: " }, function(input)
+            if input then
+                state.search_term = string.lower(input)
+                render(state)
+            end
+        end)
+    end)
+
+    map('c', function()
+        state.search_term = ""
         render(state)
     end)
 
