@@ -90,9 +90,9 @@ local function build_lines(state, node, indent)
 
         local select_icon = ""
         if has_mtd(node) then
-            select_icon = node.is_selected and "(*) " or "( ) "
+            select_icon = node.is_selected and "🗹 " or "☐ "
         elseif not is_searching then
-            select_icon = node.is_selected and "[x] " or "[ ] "
+            select_icon = node.is_expanded and "󰝰 " or "󰉋 "
         end
 
         table.insert(state.lines, prefix .. expand_icon .. select_icon .. (node.label or "Unknown"))
