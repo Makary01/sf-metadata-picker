@@ -13,7 +13,14 @@ vim.api.nvim_create_user_command("SfMeta", function(opts)
     end
 end, {
     nargs = 1,
-    complete = function()
-        return { "open", "refresh" }
+    complete = function(arglead)
+        local completions = { "open", "refresh" }
+        local filtered = {}
+        for _, completion in ipairs(completions) do
+            if vim.startswith(completion, arglead) then
+                table.insert(filtered, completion)
+            end
+        end
+        return filtered
     end,
 })
